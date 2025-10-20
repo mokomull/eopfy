@@ -1,5 +1,8 @@
 use anyhow::Context as _;
-use axum::{response::Response, routing::get};
+use axum::{
+    response::Response,
+    routing::{get, post},
+};
 use http::HeaderValue;
 
 static INDEX_HTML: &str = include_str!("index.html");
@@ -14,9 +17,19 @@ async fn root() -> Response<String> {
         .expect("building the result should succeed")
 }
 
+async fn keepalive() -> Response<String> {
+    Response::builder()
+        .status(http::StatusCode::SEE_OTHER)
+        .header(http::header::LOCATION, HeaderValue::from_static("/"))
+        .body("".into())
+        .expect("building keepalive result should succeed")
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let app = axum::Router::new().route("/", get(root));
+    let app = axum::Router::new()
+        .route("/", get(root))
+        .route("/keepalive", post(keepalive));
     let listener = tokio::net::TcpListener::bind(
         std::env::args()
             .nth(1)
