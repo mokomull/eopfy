@@ -1,3 +1,8 @@
+use std::{
+    borrow::Cow,
+    time::{Duration, SystemTime},
+};
+
 use anyhow::Context as _;
 use axum::{
     response::Response,
@@ -10,10 +15,17 @@ type SessionPool = axum_session::SessionNullPool;
 
 static INDEX_HTML: &str = include_str!("index.html");
 
+static SESSION_EXPIRATION_KEY: &str = "session_expiration";
+const SESSION_DURATION: Duration = Duration::from_secs(30);
+
 async fn root(session: Session<SessionPool>) -> Response<String> {
+    let expire_time = session
+        .get::<SystemTime>(SESSION_EXPIRATION_KEY)
+        .map(|t| Cow::Owned(humantime::format_rfc3339(t).to_string()))
+        .unwrap_or(Cow::Borrowed("some time in the future idk"));
     let data = INDEX_HTML
         .replace("SESSION_ID", &session.get_session_id())
-        .replace("EXPIRE_TIME", "some time in the future idk");
+        .replace("EXPIRE_TIME", &expire_time);
 
     Response::builder()
         .header(
@@ -24,7 +36,8 @@ async fn root(session: Session<SessionPool>) -> Response<String> {
         .expect("building the result should succeed")
 }
 
-async fn keepalive() -> Response<String> {
+async fn keepalive(session: Session<SessionPool>) -> Response<String> {
+    session.set(SESSION_EXPIRATION_KEY, SystemTime::now() + SESSION_DURATION);
     Response::builder()
         .status(http::StatusCode::SEE_OTHER)
         .header(http::header::LOCATION, HeaderValue::from_static("/"))
