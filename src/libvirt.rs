@@ -111,9 +111,9 @@ impl Libvirt {
                         .to_libvirt()
                         .expect("metadata serialization should never fail"),
                 ),
-                None,
+                Some("eopfy"),
                 Some(XML_NAMESPACE),
-                VIR_DOMAIN_AFFECT_LIVE | VIR_DOMAIN_AFFECT_CONFIG,
+                VIR_DOMAIN_AFFECT_LIVE,
             )
             .context("set_metadata")?;
         Ok(())
