@@ -11,6 +11,8 @@ use axum::{
 use axum_session::{Session, SessionConfig, SessionLayer, SessionNullSessionStore};
 use http::HeaderValue;
 
+mod libvirt;
+
 type SessionPool = axum_session::SessionNullPool;
 
 static INDEX_HTML: &str = include_str!("index.html");

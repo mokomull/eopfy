@@ -1,0 +1,55 @@
+use std::time::SystemTime;
+
+use serde::{Deserialize, Serialize};
+use serde_xml_rs::SerdeXml;
+use xml::EmitterConfig;
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "metadata")]
+struct Metadata {
+    expiration: SystemTime,
+}
+
+impl Metadata {
+    fn from_libvirt(data: &str) -> anyhow::Result<Self> {
+        let serde_xml = SerdeXml::new();
+        serde_xml.from_str(data).map_err(Into::into)
+    }
+
+    fn to_libvirt(&self) -> anyhow::Result<String> {
+        let emitter = EmitterConfig::new().write_document_declaration(false);
+        let serde_xml = SerdeXml::new()
+            .default_namespace("https://eopfy.mmlx.us/metadata")
+            .emitter(emitter);
+        serde_xml.to_string(self).map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn deserialize_from_libvirt_virDomainGetMetadata() {
+        // libvirt seems to clean up the namespaces, since you ask for metadata by xmlns
+        let text = "<metadata><expiration><secs_since_epoch>0</secs_since_epoch><nanos_since_epoch>0</nanos_since_epoch></expiration></metadata>";
+        assert_eq!(
+            Metadata::from_libvirt(text).unwrap(),
+            Metadata {
+                expiration: SystemTime::UNIX_EPOCH,
+            }
+        );
+    }
+
+    #[test]
+    fn serialize_to_libvirt() {
+        let metadata = Metadata {
+            expiration: SystemTime::UNIX_EPOCH,
+        };
+        assert_eq!(
+            &metadata.to_libvirt().unwrap(),
+            "<metadata xmlns=\"https://eopfy.mmlx.us/metadata\"><expiration><secs_since_epoch>0</secs_since_epoch><nanos_since_epoch>0</nanos_since_epoch></expiration></metadata>"
+        );
+    }
+}
