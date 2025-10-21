@@ -3,7 +3,15 @@ use std::{path::PathBuf, time::SystemTime};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::SerdeXml;
+use uuid::Uuid;
+use virt::{
+    domain::Domain,
+    error::ErrorNumber,
+    sys::{VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_METADATA_ELEMENT},
+};
 use xml::EmitterConfig;
+
+static XML_NAMESPACE: &str = "https://eopfy.mmlx.us/metadata";
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "metadata")]
@@ -20,7 +28,7 @@ impl Metadata {
     fn to_libvirt(&self) -> anyhow::Result<String> {
         let emitter = EmitterConfig::new().write_document_declaration(false);
         let serde_xml = SerdeXml::new()
-            .default_namespace("https://eopfy.mmlx.us/metadata")
+            .default_namespace(XML_NAMESPACE)
             .emitter(emitter);
         serde_xml.to_string(self).map_err(Into::into)
     }
@@ -44,6 +52,23 @@ impl Libvirt {
         let connection = virt::connect::Connect::open(Some(&config.connection_string))
             .context("connecting to libvirt")?;
         Ok(Self { config, connection })
+    }
+
+    pub fn get_expiration_for(&mut self, uuid: Uuid) -> anyhow::Result<Option<SystemTime>> {
+        let domain = match Domain::lookup_by_uuid(&self.connection, uuid) {
+            Ok(d) => d,
+            Err(e) if e.code() == ErrorNumber::NoDomain => return Ok(None),
+            Err(e) => return Err(anyhow::Error::from(e).context("lookup_by_uuid")),
+        };
+        let metadata = domain
+            .get_metadata(
+                VIR_DOMAIN_METADATA_ELEMENT as i32,
+                Some(XML_NAMESPACE),
+                VIR_DOMAIN_AFFECT_CURRENT,
+            )
+            .context("get_metadata")?;
+        let metadata = Metadata::from_libvirt(&metadata).context("parsing metadata")?;
+        Ok(Some(metadata.expiration))
     }
 }
 

@@ -333,6 +333,7 @@ dependencies = [
  "serde-xml-rs",
  "tokio",
  "toml",
+ "uuid",
  "virt",
  "xml-rs",
 ]

@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    str::FromStr,
     sync::Mutex,
     time::{Duration, SystemTime},
 };
@@ -7,12 +8,14 @@ use std::{
 use anyhow::Context as _;
 use anyhow::anyhow;
 use axum::{
+    Json,
     response::Response,
     routing::{get, post},
 };
 use axum_session::{Session, SessionConfig, SessionLayer, SessionNullSessionStore};
 use http::HeaderValue;
 use serde::Deserialize;
+use uuid::Uuid;
 
 mod libvirt;
 
@@ -32,10 +35,17 @@ struct Config {
 }
 
 async fn root(session: Session<SessionPool>) -> Response<String> {
-    let expire_time = session
-        .get::<SystemTime>(SESSION_EXPIRATION_KEY)
-        .map(|t| Cow::Owned(humantime::format_rfc3339(t).to_string()))
-        .unwrap_or(Cow::Borrowed("some time in the future idk"));
+    let expire_time = {
+        let mut libvirt = LIBVIRT.lock().unwrap();
+        let libvirt = libvirt.as_mut().unwrap();
+        libvirt
+            .get_expiration_for(
+                Uuid::from_str(&session.get_session_id()).expect("session IDs are UUIDs"),
+            )
+            .expect("get_expiration_for") // TODO: actually return a 500 instead of crashing
+    }
+    .map(|t| Cow::Owned(humantime::format_rfc3339(t).to_string()))
+    .unwrap_or(Cow::Borrowed("some time in the future idk"));
     let data = INDEX_HTML
         .replace("SESSION_ID", &session.get_session_id())
         .replace("EXPIRE_TIME", &expire_time);
