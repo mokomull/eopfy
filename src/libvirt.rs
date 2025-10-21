@@ -1,16 +1,26 @@
-use std::{path::PathBuf, time::SystemTime};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    process::{Command, ExitStatus},
+    time::SystemTime,
+};
 
 use anyhow::Context;
+use handlebars::Handlebars;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::SerdeXml;
 use uuid::Uuid;
 use virt::{
     domain::Domain,
     error::ErrorNumber,
-    sys::{VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_METADATA_ELEMENT},
+    sys::{
+        VIR_DOMAIN_AFFECT_CONFIG, VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_AFFECT_LIVE,
+        VIR_DOMAIN_METADATA_ELEMENT, VIR_DOMAIN_NONE,
+    },
 };
-use xml::EmitterConfig;
+use xml::{EmitterConfig, common::Position};
 
+static DOMAIN_TEMPLATE_NAME: &str = "DOMAIN";
 static XML_NAMESPACE: &str = "https://eopfy.mmlx.us/metadata";
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -44,6 +54,7 @@ pub struct Config {
 
 pub struct Libvirt {
     connection: virt::connect::Connect,
+    template: Handlebars<'static>,
     config: Config,
 }
 
@@ -51,14 +62,31 @@ impl Libvirt {
     pub fn connect(config: Config) -> anyhow::Result<Self> {
         let connection = virt::connect::Connect::open(Some(&config.connection_string))
             .context("connecting to libvirt")?;
-        Ok(Self { config, connection })
+
+        let mut handlebars = Handlebars::new();
+        handlebars
+            .register_template_file(DOMAIN_TEMPLATE_NAME, &config.xml_template_path)
+            .context("registering XML template")?;
+
+        Ok(Self {
+            config,
+            connection,
+            template: handlebars,
+        })
+    }
+
+    fn get_domain(&mut self, uuid: Uuid) -> anyhow::Result<Option<Domain>> {
+        match Domain::lookup_by_uuid(&self.connection, uuid) {
+            Ok(d) => Ok(Some(d)),
+            Err(e) if e.code() == ErrorNumber::NoDomain => return Ok(None),
+            Err(e) => return Err(anyhow::Error::from(e).context("lookup_by_uuid")),
+        }
     }
 
     pub fn get_expiration_for(&mut self, uuid: Uuid) -> anyhow::Result<Option<SystemTime>> {
-        let domain = match Domain::lookup_by_uuid(&self.connection, uuid) {
-            Ok(d) => d,
-            Err(e) if e.code() == ErrorNumber::NoDomain => return Ok(None),
-            Err(e) => return Err(anyhow::Error::from(e).context("lookup_by_uuid")),
+        let domain = self.get_domain(uuid)?;
+        let Some(domain) = domain else {
+            return Ok(None);
         };
         let metadata = domain
             .get_metadata(
@@ -69,6 +97,104 @@ impl Libvirt {
             .context("get_metadata")?;
         let metadata = Metadata::from_libvirt(&metadata).context("parsing metadata")?;
         Ok(Some(metadata.expiration))
+    }
+
+    fn keepalive(&mut self, domain: Domain) -> anyhow::Result<()> {
+        let metadata = Metadata {
+            expiration: SystemTime::now() + super::SESSION_DURATION,
+        };
+        domain
+            .set_metadata(
+                VIR_DOMAIN_METADATA_ELEMENT as i32,
+                Some(
+                    &metadata
+                        .to_libvirt()
+                        .expect("metadata serialization should never fail"),
+                ),
+                None,
+                Some(XML_NAMESPACE),
+                VIR_DOMAIN_AFFECT_LIVE | VIR_DOMAIN_AFFECT_CONFIG,
+            )
+            .context("set_metadata")?;
+        Ok(())
+    }
+
+    fn create(&mut self, uuid: Uuid) -> anyhow::Result<()> {
+        let disk = tempfile::NamedTempFile::new_in(&self.config.temporary_dir)?;
+
+        // create the qcow2 image
+        let status = Command::new("/usr/bin/qemu-img")
+            .arg("create")
+            .arg("-b")
+            .arg(&self.config.disk_template_path)
+            .arg("-F")
+            .arg("qcow2")
+            .arg("-f")
+            .arg("qcow2")
+            .arg(disk.path())
+            .spawn()
+            .context("spawning qemu-img")?
+            .wait()
+            .context("wait failed for some reason")?; // TODO: can this even happen?
+        if !status.success() {
+            anyhow::bail!("qemu-img failed with error {:?}", status.code());
+        }
+
+        let status = Command::new("/usr/bin/setfacl")
+            .arg("-m")
+            .arg("u:libvirt-qemu:rw")
+            .arg(disk.path())
+            .spawn()
+            .context("spawning setfacl")?
+            .wait()
+            .context("why would wait fail")?;
+        if !status.success() {
+            anyhow::bail!("setfacl failed with error {:?}", status.code());
+        }
+
+        // template the XML
+        let domain_xml = self
+            .template
+            .render(
+                DOMAIN_TEMPLATE_NAME,
+                &HashMap::from([
+                    ("name", format!("temporary-{}", uuid.to_string()).as_str()),
+                    ("uuid", uuid.to_string().as_str()),
+                    (
+                        "disk",
+                        disk.path()
+                            .to_str()
+                            .expect("NamedTempFile paths should always be UTF-8"),
+                    ),
+                    (
+                        "metadata",
+                        Metadata {
+                            expiration: SystemTime::now() + super::SESSION_DURATION,
+                        }
+                        .to_libvirt()
+                        .expect("metadata serialization should be infallible")
+                        .as_str(),
+                    ),
+                ]),
+            )
+            .context("creating domain template")?;
+
+        Domain::create_xml(&self.connection, &domain_xml, VIR_DOMAIN_NONE)
+            .context("launching VM")?;
+
+        Ok(())
+    }
+
+    pub fn create_or_keepalive(&mut self, uuid: Uuid) -> anyhow::Result<()> {
+        if let Some(domain) = self.get_domain(uuid)? {
+            self.keepalive(domain)?;
+        } else {
+            // this is long-running so it should run with spawn_blocking, but ... this API
+            // intentionally takes a &mut self so that no concurrent mutations can happen so it
+            // really doesn't matter if I break a tokio runner thread.
+            self.create(uuid)?;
+        }
+        Ok(())
     }
 }
 

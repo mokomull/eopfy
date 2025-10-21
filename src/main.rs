@@ -23,7 +23,6 @@ type SessionPool = axum_session::SessionNullPool;
 
 static INDEX_HTML: &str = include_str!("index.html");
 
-static SESSION_EXPIRATION_KEY: &str = "session_expiration";
 const SESSION_DURATION: Duration = Duration::from_secs(30);
 
 static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
@@ -60,7 +59,13 @@ async fn root(session: Session<SessionPool>) -> Response<String> {
 }
 
 async fn keepalive(session: Session<SessionPool>) -> Response<String> {
-    session.set(SESSION_EXPIRATION_KEY, SystemTime::now() + SESSION_DURATION);
+    let mut libvirt = LIBVIRT.lock().unwrap();
+    let libvirt = libvirt.as_mut().unwrap();
+    libvirt
+        .create_or_keepalive(
+            Uuid::from_str(&session.get_session_id()).expect("session IDs are UUIDs"),
+        )
+        .expect("create_or_keepalive"); // TODO: actually return a 500 instead of crashing
     Response::builder()
         .status(http::StatusCode::SEE_OTHER)
         .header(http::header::LOCATION, HeaderValue::from_static("/"))
