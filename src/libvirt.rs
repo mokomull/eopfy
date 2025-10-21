@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{path::PathBuf, time::SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::SerdeXml;
@@ -23,6 +23,13 @@ impl Metadata {
             .emitter(emitter);
         serde_xml.to_string(self).map_err(Into::into)
     }
+}
+
+#[derive(Deserialize)]
+pub struct Config {
+    xml_template_path: PathBuf,
+    disk_template_path: PathBuf,
+    temporary_dir: String,
 }
 
 #[cfg(test)]
