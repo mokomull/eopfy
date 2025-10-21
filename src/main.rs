@@ -1,14 +1,8 @@
-use std::{
-    borrow::Cow,
-    str::FromStr,
-    sync::Mutex,
-    time::{Duration, SystemTime},
-};
+use std::{borrow::Cow, str::FromStr, sync::Mutex, time::Duration};
 
 use anyhow::Context as _;
 use anyhow::anyhow;
 use axum::{
-    Json,
     response::Response,
     routing::{get, post},
 };

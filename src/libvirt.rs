@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    process::{Command, ExitStatus},
-    time::SystemTime,
-};
+use std::{collections::HashMap, path::PathBuf, process::Command, time::SystemTime};
 
 use anyhow::Context;
 use handlebars::Handlebars;
@@ -14,11 +9,11 @@ use virt::{
     domain::Domain,
     error::ErrorNumber,
     sys::{
-        VIR_DOMAIN_AFFECT_CONFIG, VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_AFFECT_LIVE,
-        VIR_DOMAIN_METADATA_ELEMENT, VIR_DOMAIN_NONE,
+        VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_AFFECT_LIVE, VIR_DOMAIN_METADATA_ELEMENT,
+        VIR_DOMAIN_NONE,
     },
 };
-use xml::{EmitterConfig, common::Position};
+use xml::EmitterConfig;
 
 static DOMAIN_TEMPLATE_NAME: &str = "DOMAIN";
 static XML_NAMESPACE: &str = "https://eopfy.mmlx.us/metadata";
@@ -78,8 +73,8 @@ impl Libvirt {
     fn get_domain(&mut self, uuid: Uuid) -> anyhow::Result<Option<Domain>> {
         match Domain::lookup_by_uuid(&self.connection, uuid) {
             Ok(d) => Ok(Some(d)),
-            Err(e) if e.code() == ErrorNumber::NoDomain => return Ok(None),
-            Err(e) => return Err(anyhow::Error::from(e).context("lookup_by_uuid")),
+            Err(e) if e.code() == ErrorNumber::NoDomain => Ok(None),
+            Err(e) => Err(anyhow::Error::from(e).context("lookup_by_uuid")),
         }
     }
 
@@ -158,7 +153,7 @@ impl Libvirt {
             .render(
                 DOMAIN_TEMPLATE_NAME,
                 &HashMap::from([
-                    ("name", format!("temporary-{}", uuid.to_string()).as_str()),
+                    ("name", format!("temporary-{}", uuid).as_str()),
                     ("uuid", uuid.to_string().as_str()),
                     (
                         "disk",
