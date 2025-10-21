@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf, process::Command, time::SystemTim
 
 use anyhow::Context;
 use handlebars::Handlebars;
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::SerdeXml;
 use uuid::Uuid;
@@ -9,8 +10,8 @@ use virt::{
     domain::Domain,
     error::ErrorNumber,
     sys::{
-        VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_AFFECT_LIVE, VIR_DOMAIN_METADATA_ELEMENT,
-        VIR_DOMAIN_NONE,
+        VIR_CONNECT_LIST_DOMAINS_TRANSIENT, VIR_DOMAIN_AFFECT_CURRENT, VIR_DOMAIN_AFFECT_LIVE,
+        VIR_DOMAIN_METADATA_ELEMENT, VIR_DOMAIN_NONE,
     },
 };
 use xml::EmitterConfig;
@@ -189,6 +190,47 @@ impl Libvirt {
             // really doesn't matter if I break a tokio runner thread.
             self.create(uuid)?;
         }
+        Ok(())
+    }
+
+    pub fn expire(&mut self) -> anyhow::Result<()> {
+        let now = SystemTime::now();
+
+        for domain in self
+            .connection
+            .list_all_domains(VIR_CONNECT_LIST_DOMAINS_TRANSIENT)
+            .context("list_all_domains")?
+        {
+            info!("checking domain {}", domain.get_uuid().unwrap());
+            let metadata = match domain.get_metadata(
+                VIR_DOMAIN_METADATA_ELEMENT as i32,
+                Some(XML_NAMESPACE),
+                0,
+            ) {
+                Ok(s) => s,
+                Err(e) if e.code() == ErrorNumber::NoDomainMetadata => {
+                    warn!("this domain has no eopfy metadata");
+                    continue;
+                }
+                Err(e) => return Err(anyhow::Error::from(e).context("get_metadata")),
+            };
+
+            let metadata = match Metadata::from_libvirt(&metadata) {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!("could not parse eopfy metadata: {e:?}");
+                    continue;
+                }
+            };
+
+            if metadata.expiration < now {
+                info!("stopping the domain");
+                if let Err(e) = domain.destroy() {
+                    error!("could not destroy the domain: {e:?}");
+                }
+            }
+        }
+
         Ok(())
     }
 }

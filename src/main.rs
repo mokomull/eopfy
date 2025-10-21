@@ -8,6 +8,7 @@ use axum::{
 };
 use axum_session::{Session, SessionConfig, SessionLayer, SessionNullSessionStore};
 use http::HeaderValue;
+use log::info;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -18,6 +19,7 @@ type SessionPool = axum_session::SessionNullPool;
 static INDEX_HTML: &str = include_str!("index.html");
 
 const SESSION_DURATION: Duration = Duration::from_secs(30);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(30);
 
 static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
 
@@ -67,8 +69,24 @@ async fn keepalive(session: Session<SessionPool>) -> Response<String> {
         .expect("building keepalive result should succeed")
 }
 
+async fn cleanup_sessions() {
+    let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+        info!("cleaning up sessions");
+
+        let mut libvirt = LIBVIRT.lock().unwrap();
+        let libvirt = libvirt.as_mut().unwrap();
+        libvirt.expire().expect("expiration process should succeed");
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let config_path = std::env::args().nth(1).ok_or(anyhow!(
         "you must provide the config file on the command line"
     ))?;
@@ -83,6 +101,8 @@ async fn main() -> anyhow::Result<()> {
 
     let libvirt = libvirt::Libvirt::connect(config.libvirt).context("initializing libvirt")?;
     *LIBVIRT.lock().unwrap() = Some(libvirt);
+
+    tokio::spawn(cleanup_sessions());
 
     let session_config = SessionConfig::default().with_key(axum_session::Key::generate());
     let session_store = SessionNullSessionStore::new(None, session_config)
