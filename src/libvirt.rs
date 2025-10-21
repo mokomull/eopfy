@@ -1,5 +1,6 @@
 use std::{path::PathBuf, time::SystemTime};
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::SerdeXml;
 use xml::EmitterConfig;
@@ -27,9 +28,23 @@ impl Metadata {
 
 #[derive(Deserialize)]
 pub struct Config {
+    connection_string: String,
     xml_template_path: PathBuf,
     disk_template_path: PathBuf,
     temporary_dir: String,
+}
+
+pub struct Libvirt {
+    connection: virt::connect::Connect,
+    config: Config,
+}
+
+impl Libvirt {
+    pub fn connect(config: Config) -> anyhow::Result<Self> {
+        let connection = virt::connect::Connect::open(Some(&config.connection_string))
+            .context("connecting to libvirt")?;
+        Ok(Self { config, connection })
+    }
 }
 
 #[cfg(test)]

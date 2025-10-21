@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    sync::Mutex,
     time::{Duration, SystemTime},
 };
 
@@ -21,6 +22,8 @@ static INDEX_HTML: &str = include_str!("index.html");
 
 static SESSION_EXPIRATION_KEY: &str = "session_expiration";
 const SESSION_DURATION: Duration = Duration::from_secs(30);
+
+static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
 
 #[derive(Deserialize)]
 struct Config {
@@ -68,6 +71,9 @@ async fn main() -> anyhow::Result<()> {
         .context("config file is not UTF8")?,
     )
     .context("could not parse TOML")?;
+
+    let libvirt = libvirt::Libvirt::connect(config.libvirt).context("initializing libvirt")?;
+    *LIBVIRT.lock().unwrap() = Some(libvirt);
 
     let session_config = SessionConfig::default().with_key(axum_session::Key::generate());
     let session_store = SessionNullSessionStore::new(None, session_config)
