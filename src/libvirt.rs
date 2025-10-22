@@ -148,14 +148,18 @@ impl Libvirt {
             anyhow::bail!("setfacl failed with error {:?}", status.code());
         }
 
+        let uuid = uuid.to_string();
+        let name = format!("temporary-{}", uuid);
+        let spice_unix_socket = format!("{}/spice-{}", self.config.temporary_dir, uuid);
+
         // template the XML
         let domain_xml = self
             .template
             .render(
                 DOMAIN_TEMPLATE_NAME,
                 &HashMap::from([
-                    ("name", format!("temporary-{}", uuid).as_str()),
-                    ("uuid", uuid.to_string().as_str()),
+                    ("name", name.as_str()),
+                    ("uuid", &uuid),
                     (
                         "disk",
                         disk.path()
@@ -171,6 +175,7 @@ impl Libvirt {
                         .expect("metadata serialization should be infallible")
                         .as_str(),
                     ),
+                    ("spice_unix_socket", &spice_unix_socket),
                 ]),
             )
             .context("creating domain template")?;
