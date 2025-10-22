@@ -115,7 +115,7 @@ impl Libvirt {
         Ok(())
     }
 
-    fn create(&mut self, uuid: Uuid) -> anyhow::Result<()> {
+    fn create(&mut self, uuid: Uuid) -> anyhow::Result<String> {
         let disk = tempfile::NamedTempFile::new_in(&self.config.temporary_dir)?;
 
         // create the qcow2 image
@@ -150,7 +150,8 @@ impl Libvirt {
 
         let uuid = uuid.to_string();
         let name = format!("temporary-{}", uuid);
-        let spice_unix_socket = format!("{}/spice-{}", self.config.temporary_dir, uuid);
+        let socket_relative_path = format!("spice-{}", uuid);
+        let spice_unix_socket = format!("{}/{}", self.config.temporary_dir, socket_relative_path);
 
         // template the XML
         let domain_xml = self
@@ -183,19 +184,19 @@ impl Libvirt {
         Domain::create_xml(&self.connection, &domain_xml, VIR_DOMAIN_NONE)
             .context("launching VM")?;
 
-        Ok(())
+        Ok(socket_relative_path)
     }
 
-    pub fn create_or_keepalive(&mut self, uuid: Uuid) -> anyhow::Result<()> {
+    pub fn create_or_keepalive(&mut self, uuid: Uuid) -> anyhow::Result<String> {
         if let Some(domain) = self.get_domain(uuid)? {
             self.keepalive(domain)?;
+            Ok(format!("spice-{}", uuid))
         } else {
             // this is long-running so it should run with spawn_blocking, but ... this API
             // intentionally takes a &mut self so that no concurrent mutations can happen so it
             // really doesn't matter if I break a tokio runner thread.
-            self.create(uuid)?;
+            self.create(uuid)
         }
-        Ok(())
     }
 
     pub fn expire(&mut self) -> anyhow::Result<()> {
