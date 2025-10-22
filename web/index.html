@@ -1,12 +1,16 @@
 <!doctype html>
 <html>
-
+<head>
+    <script type="module" src="index.js">
+    </script>
+</head>
 <body>
     <p>Your session ID is SESSION_ID</p>
     <p>Your session will expire at EXPIRE_TIME</p>
     <form action="/connect" method="post">
         <input type="submit" value="Keep alive!">
     </form>
+    <div id="screen"></div>
 </body>
 
 </html>

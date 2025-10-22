@@ -1,0 +1,12 @@
+{
+  "name": "eopfy",
+  "version": "0.1.0",
+  "author": "Matt Mullins <mmullins@mmlx.us>",
+  "type": "module",
+  "dependencies": {
+    "@novnc/novnc": "=1.6.0-g44b7489"
+  },
+  "devDependencies": {
+    "vite": "^7.1.11"
+  }
+}
