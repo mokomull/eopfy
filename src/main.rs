@@ -6,9 +6,12 @@ use axum::Json;
 use axum::extract::State;
 use axum::{response::Response, routing::post};
 use axum_session::{Session, SessionConfig, SessionLayer, SessionNullSessionStore};
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use http::HeaderValue;
 use http::StatusCode;
 use log::info;
+use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -26,6 +29,7 @@ static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
 struct Config {
     static_web_path: String,
     listen_address: String,
+    cookie_key: Option<String>,
     websocket_uri: String,
     libvirt: libvirt::Config,
 }
@@ -113,7 +117,13 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::spawn(cleanup_sessions());
 
-    let session_config = SessionConfig::default().with_key(axum_session::Key::generate());
+    let cookie_key = config.cookie_key.and_then(|ck| BASE64_STANDARD
+        .decode(ck).ok())
+        .and_then(|s| axum_session::Key::try_from(s.as_slice()).ok())
+        .unwrap_or_else(|| {warn!("no session cookie key loaded, generating one");
+            axum_session::Key::generate}());
+
+    let session_config = SessionConfig::default().with_key(cookie_key);
     let session_store = SessionNullSessionStore::new(None, session_config)
         .await
         .context("creating session store")?;

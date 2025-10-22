@@ -480,6 +480,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum_session",
+ "base64",
  "env_logger",
  "form_urlencoded",
  "handlebars",
