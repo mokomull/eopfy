@@ -150,8 +150,8 @@ impl Libvirt {
 
         let uuid = uuid.to_string();
         let name = format!("temporary-{}", uuid);
-        let socket_relative_path = format!("spice-{}", uuid);
-        let spice_unix_socket = format!("{}/{}", self.config.temporary_dir, socket_relative_path);
+        let socket_relative_path = format!("vnc-{}", uuid);
+        let vnc_unix_socket = format!("{}/{}", self.config.temporary_dir, socket_relative_path);
 
         // template the XML
         let domain_xml = self
@@ -176,7 +176,7 @@ impl Libvirt {
                         .expect("metadata serialization should be infallible")
                         .as_str(),
                     ),
-                    ("spice_unix_socket", &spice_unix_socket),
+                    ("vnc_unix_socket", &vnc_unix_socket),
                 ]),
             )
             .context("creating domain template")?;
@@ -190,7 +190,7 @@ impl Libvirt {
     pub fn create_or_keepalive(&mut self, uuid: Uuid) -> anyhow::Result<String> {
         if let Some(domain) = self.get_domain(uuid)? {
             self.keepalive(domain)?;
-            Ok(format!("spice-{}", uuid))
+            Ok(format!("vnc-{}", uuid))
         } else {
             // this is long-running so it should run with spawn_blocking, but ... this API
             // intentionally takes a &mut self so that no concurrent mutations can happen so it
