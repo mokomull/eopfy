@@ -1,1 +1,4 @@
 /target
+/config/
+/node_modules/
+/web/dist/
