@@ -13,15 +13,14 @@ use http::StatusCode;
 use log::info;
 use log::warn;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
+use serde::de::Error as _;
 use uuid::Uuid;
 
 mod libvirt;
 
 type SessionPool = axum_session::SessionNullPool;
-
-const SESSION_DURATION: Duration = Duration::from_secs(30);
-const CLEANUP_INTERVAL: Duration = Duration::from_secs(30);
 
 static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
 
@@ -32,6 +31,24 @@ struct Config {
     cookie_key: Option<String>,
     websocket_uri: String,
     libvirt: libvirt::Config,
+    #[serde(
+        deserialize_with = "duration_humantime",
+        default = "default_cleanup_interval"
+    )]
+    cleanup_interval: Duration,
+}
+
+fn duration_humantime<'a, D>(de: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'a>,
+{
+    let string = String::deserialize(de)?;
+    humantime::parse_duration(&string).map_err(|e| {
+        D::Error::invalid_value(
+            serde::de::Unexpected::Str(&format!("string {string:?}: {e:?}")),
+            &"something that the humantime crate understands",
+        )
+    })
 }
 
 #[derive(Serialize)]
@@ -82,8 +99,12 @@ async fn keepalive(session: Session<SessionPool>) -> Response<String> {
         .expect("building keepalive result should succeed")
 }
 
-async fn cleanup_sessions() {
-    let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+fn default_cleanup_interval() -> Duration {
+    Duration::from_secs(60)
+}
+
+async fn cleanup_sessions(interval: Duration) {
+    let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -115,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
     let libvirt = libvirt::Libvirt::connect(config.libvirt).context("initializing libvirt")?;
     *LIBVIRT.lock().unwrap() = Some(libvirt);
 
-    tokio::spawn(cleanup_sessions());
+    tokio::spawn(cleanup_sessions(config.cleanup_interval));
 
     let cookie_key = config.cookie_key.and_then(|ck| BASE64_STANDARD
         .decode(ck).ok())

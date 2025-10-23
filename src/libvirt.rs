@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf, process::Command, time::SystemTime};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    process::Command,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Context;
 use handlebars::Handlebars;
@@ -46,6 +51,15 @@ pub struct Config {
     xml_template_path: PathBuf,
     disk_template_path: PathBuf,
     temporary_dir: String,
+    #[serde(
+        deserialize_with = "super::duration_humantime",
+        default = "default_vm_duration"
+    )]
+    vm_duration: Duration,
+}
+
+fn default_vm_duration() -> Duration {
+    Duration::from_secs(900)
 }
 
 pub struct Libvirt {
@@ -97,7 +111,7 @@ impl Libvirt {
 
     fn keepalive(&mut self, domain: Domain) -> anyhow::Result<()> {
         let metadata = Metadata {
-            expiration: SystemTime::now() + super::SESSION_DURATION,
+            expiration: SystemTime::now() + self.config.vm_duration,
         };
         domain
             .set_metadata(
@@ -170,7 +184,7 @@ impl Libvirt {
                     (
                         "metadata",
                         Metadata {
-                            expiration: SystemTime::now() + super::SESSION_DURATION,
+                            expiration: SystemTime::now() + self.config.vm_duration,
                         }
                         .to_libvirt()
                         .expect("metadata serialization should be infallible")

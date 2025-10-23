@@ -16,7 +16,7 @@ When a VM is requested, it creates a new qcow2 image that references `disk_templ
 backing store.  It then creates a transient libvirt domain based on a Handlebars template at
 `xml_template_path`.
 
-Some delay (currently 30 seconds) after the last time a VM has been connected-to, the VM will be
+Some delay (by default 15 minutes) after the last time a VM has been connected-to, the VM will be
 terminated.
 
 Each VM console is available via VNC at a UNIX socket at `{{temporary_dir}}/vnc-{{uuid of the VM}}`.
