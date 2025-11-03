@@ -23,7 +23,7 @@ Each VM console is available via VNC at a UNIX socket at `{{temporary_dir}}/vnc-
 
 The VNC sockets should be served to the client using the `websockify` tool:
 
-    $ websockify --token-plugin="UnixDomainSocketDirectory" --token-source=/tmp/eopfy [::]:5000
+    $ websockify --token-plugin="JWTTokenApi" --token-source=ec-public.pem [::]:5000
 
 # Configuration
 
@@ -44,6 +44,17 @@ The domain template XML is a Handlebars template where
   * `vnc_unix_socket` is the path to the UNIX socket that qemu will listen for VNC connections. This
     is currently a path within `temporary_dir`.
 
+# Generating the EC256 keypair:
+
+Taken from [jsonwebtoken's docs][jsonwebtoken]:
+
+    $ openssl ecparam -genkey -noout -name prime256v1 \
+      | openssl pkcs8 -topk8 -nocrypt -out ec-private.pem
+
+And from Akamai's docs, export the public key for websockify:
+
+    $ openssl ec -in ec-private.pem -pubout -out ec-public.pem
+
 # Examples
 
 ## config.toml
@@ -52,6 +63,7 @@ The domain template XML is a Handlebars template where
     cookie_key = "[redacted.  head -c 64 /dev/urandom | base64]"
     listen_address = "[::]:9000"
     websocket_uri = "wss://publicly-accessible-hostname/websockify"
+    ec_private_key = "ec-private-pkcs8.pem"
 
     [libvirt]
     connection_string = "qemu:///system"
@@ -69,3 +81,4 @@ Ubuntu 22.04's is too old to understand how to behave in an IPv6-only environmen
     $ npx vite build web
 
 [novnc]: https://github.com/novnc/noVNC
+[jsonwebtoken]: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/struct.EncodingKey.html#method.from_ec_pem

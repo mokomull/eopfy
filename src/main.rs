@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{str::FromStr, sync::Mutex, time::Duration};
 
 use anyhow::Context as _;
@@ -10,6 +11,8 @@ use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use http::HeaderValue;
 use http::StatusCode;
+use jsonwebtoken::EncodingKey;
+use jsonwebtoken::Header;
 use log::info;
 use log::warn;
 use serde::Deserialize;
@@ -30,6 +33,7 @@ struct Config {
     listen_address: String,
     cookie_key: Option<String>,
     websocket_uri: String,
+    ec_private_key: String,
     libvirt: libvirt::Config,
     #[serde(
         deserialize_with = "duration_humantime",
@@ -51,16 +55,27 @@ where
     })
 }
 
+struct AppState {
+    websocket_uri: String,
+    key: EncodingKey,
+}
+
 #[derive(Serialize)]
 struct ConnectionDetails {
     ws_uri: String,
 }
 
+#[derive(Serialize)]
+struct WsToken {
+    host: &'static str,
+    port: String,
+}
+
 async fn connect(
-    uri: State<String>,
+    state: State<Arc<AppState>>,
     session: Session<SessionPool>,
 ) -> axum::response::Result<Json<ConnectionDetails>> {
-    let token = {
+    let socket_path = {
         let mut libvirt = LIBVIRT.lock().unwrap();
         let libvirt = libvirt.as_mut().unwrap();
         libvirt
@@ -73,6 +88,16 @@ async fn connect(
             })?
     };
 
+    let token = jsonwebtoken::encode(
+        &Header::new(jsonwebtoken::Algorithm::ES256),
+        &WsToken {
+            host: "unix_socket",
+            port: socket_path,
+        },
+        &state.key,
+    )
+    .expect("failed to encoding the JWT");
+
     // TODO: actually handle query strings intelligently but the http crate's Uri builder pattern
     // doesn't make it easy to just add a query parameter
     let query = form_urlencoded::Serializer::new(String::new())
@@ -80,7 +105,7 @@ async fn connect(
         .finish();
 
     Ok(Json(ConnectionDetails {
-        ws_uri: format!("{}?{}", uri.0, query),
+        ws_uri: format!("{}?{}", state.websocket_uri, query),
     }))
 }
 
@@ -133,6 +158,11 @@ async fn main() -> anyhow::Result<()> {
     )
     .context("could not parse TOML")?;
 
+    let key = jsonwebtoken::EncodingKey::from_ec_pem(
+        &std::fs::read(config.ec_private_key).context("reading EC key from disk")?,
+    )
+    .context("parsing EC key")?;
+
     let libvirt = libvirt::Libvirt::connect(config.libvirt).context("initializing libvirt")?;
     *LIBVIRT.lock().unwrap() = Some(libvirt);
 
@@ -149,12 +179,17 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("creating session store")?;
 
+    let state = AppState {
+        websocket_uri: config.websocket_uri,
+        key,
+    };
+
     let app = axum::Router::new()
         .route("/keepalive", post(keepalive))
         .route("/connect", post(connect))
         .fallback_service(tower_http::services::ServeDir::new(config.static_web_path))
         .layer(SessionLayer::new(session_store))
-        .with_state(config.websocket_uri);
+        .with_state(state.into());
 
     let listener = tokio::net::TcpListener::bind(config.listen_address)
         .await

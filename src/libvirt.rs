@@ -198,13 +198,13 @@ impl Libvirt {
         Domain::create_xml(&self.connection, &domain_xml, VIR_DOMAIN_NONE)
             .context("launching VM")?;
 
-        Ok(socket_relative_path)
+        Ok(vnc_unix_socket)
     }
 
     pub fn create_or_keepalive(&mut self, uuid: Uuid) -> anyhow::Result<String> {
         if let Some(domain) = self.get_domain(uuid)? {
             self.keepalive(domain)?;
-            Ok(format!("vnc-{}", uuid))
+            Ok(format!("{}/vnc-{}", self.config.temporary_dir, uuid))
         } else {
             // this is long-running so it should run with spawn_blocking, but ... this API
             // intentionally takes a &mut self so that no concurrent mutations can happen so it
