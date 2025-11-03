@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::SystemTime;
 use std::{str::FromStr, sync::Mutex, time::Duration};
 
 use anyhow::Context as _;
@@ -26,6 +27,8 @@ mod libvirt;
 type SessionPool = axum_session::SessionNullPool;
 
 static LIBVIRT: Mutex<Option<libvirt::Libvirt>> = Mutex::new(None);
+
+const TOKEN_LIFETIME: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize)]
 struct Config {
@@ -67,6 +70,7 @@ struct ConnectionDetails {
 
 #[derive(Serialize)]
 struct WsToken {
+    exp: u64,
     host: &'static str,
     port: String,
 }
@@ -91,6 +95,10 @@ async fn connect(
     let token = jsonwebtoken::encode(
         &Header::new(jsonwebtoken::Algorithm::ES256),
         &WsToken {
+            exp: (SystemTime::now() + TOKEN_LIFETIME)
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             host: "unix_socket",
             port: socket_path,
         },
